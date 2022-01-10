@@ -1,0 +1,4 @@
+*.pyc
+__pycache__/
+libmf/build/
+libmf/__pycache__/
