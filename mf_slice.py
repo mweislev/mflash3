@@ -9,10 +9,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 import libmf.micflash as mflash
 import libmf.micplot as mplot
-import libmf.tools as tools
 from var_settings_v3 import var_settings, intvar, GetVarSettings
-
-#import cf_rgrid_001 as rgr
 
 
 #===============================================================================
@@ -29,8 +26,8 @@ basename = '*hdf5*_'
 cntrange = list(range(34,100)) + list(range(1000,1100))
 
 # ==== FIGURE SETTINGS =========================================================
-fs = tools.set_fig_preset('display')
-tools.fig_outdir = 'simmov/%s-%s'%(version_str, tools.fig_target)
+fs = mplot.set_fig_preset('display')
+mplot.fig_outdir = 'simmov/%s-%s'%(version_str, mplot.fig_target)
 
 # ==== SLICE SETTINGS ==========================================================
 point = np.array([-2.75,-14.75,11.75])*pc
@@ -142,7 +139,7 @@ def main(plotfile, y_var):
     simname  = os.path.basename(dirname)
     subpath = simname
     
-    outfilepath = tools.get_savefig_filepath(filename, subpath)
+    outfilepath = mplot.get_savefig_filepath(filename, subpath)
     if os.path.exists(outfilepath):
         print(f'Skipping {filename}')
         return
@@ -188,7 +185,7 @@ def main(plotfile, y_var):
                 axVarSlice(ax[a,i], dgrid, key, axis=a, offset=point[a], **extparam)
                 #rgr.axBlockSlice(ax[a,i], hdfdata, octree, axis=a, offset=point[a], **extparam)
     
-    outfilepath = tools.savefig(fig, filename, subpath)
+    outfilepath = mplot.savefig(fig, filename, subpath)
     
     hdfdata.close()
 

@@ -1,7 +1,10 @@
 # -*- coding: utf-8 -*-
 import numpy as np
 import matplotlib.pylab as plt
-import sys, fnmatch, os
+import sys
+import fnmatch
+import os
+import time
 from ast import literal_eval
 import matplotlib as mpl
 import matplotlib.colors as cl
@@ -17,6 +20,7 @@ __version__ = '1.0.0.0'
 
 homepath = os.path.expanduser("~")
 wall = str(int(time.time()))
+
 
 #===============================================================================
 # ==== GENERAL FIGURE TOOLS ====================================================
@@ -414,8 +418,6 @@ def axFakeLabel(ax, text, *args, **kwargs):
 # ==== SAVE FIGURE =============================================================
 #===============================================================================
 
-savefig.counter = dict()
-
 def compose_name(*scraps):
     figname = ''
     for part in scraps:
@@ -545,6 +547,8 @@ def savefig(fig, name, subpath='', autoclose=True, autopickle=False, **overrides
     if autoclose:
         plt.close(fig)
     return filepath
+
+savefig.counter = dict()
 
 def storefig(fig, name, subpath='', autoclose=False):
     # Get unused filepath in guaranteed directory
