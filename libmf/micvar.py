@@ -18,6 +18,7 @@ class flashfile(object):
     def __init__(self, filename):
         self.__filename = filename
         self.__plotfile = h5py.File(self.__filename, 'r')
+        self.__closed = False
     def __enter__(self):
         return self
     def __exit__(self, *exc):
@@ -30,7 +31,9 @@ class flashfile(object):
         answer += self.__filename+'\n'
         return answer        
     def read_raw(self, path):
-        route = [subdir for subdir in path.split('/') if subdir!=''] 
+        if self.__closed:
+            raise IOError('Trying to read_raw from closed flashfile')
+        route = [subdir for subdir in path.split('/') if subdir!='']
         dset = self.__plotfile
         for step in route:
             if not hasattr(dset, 'keys'):
@@ -49,6 +52,8 @@ class flashfile(object):
         return dset
 
     def read(self, path, dtype=None):
+        if self.__closed:
+            raise IOError('Trying to read from closed flashfile')
         data = self.read_raw(path)
         dtype_in = np.dtype(data.dtype)
         if dtype is None:
@@ -95,10 +100,13 @@ class flashfile(object):
         fp = os.path.normpath(self.__filename)
         return fp
     def close(self):
-        try:
-            self.__plotfile.close()
-        except IOError:
-            pass
+        if not self.__closed:
+            try:
+                self.__plotfile.close()
+            except IOError:
+                pass
+            finally:
+                self.__closed = True
 
 
 # ==============================================================================
@@ -241,6 +249,9 @@ var_grid = {
     'blockcount': ('cellcount', 'nxb', '/', 'nyb', '/', 'nzb', '/'),
     'nodeindex': ('ndid', lambda x: np.reshape(x, (-1,1,1,1)), 'intones', '*'),
     'blockindex': ('blid', lambda x: np.reshape(x, (-1,1,1,1)), 'intones', '*'),
+
+    'jl_ref':   ('integer runtime parameters/ncell_ref_jeans', ),
+    'jl_deref': ('integer runtime parameters/ncell_deref_jeans', ),
 }
 
 var_2d = {
@@ -296,6 +307,8 @@ var_mhd = {
         'magz', 'velz', '*', '+', 'mag_sq', 'vel_sq', '*', np.sqrt, '/'),
     'vb_oangle': ('vb_cos', lambda x:np.clip(x,-1,1), np.arccos, 180./np.pi, '*'),
     'vb_angle': ('vb_cos', lambda x:np.clip(np.fabs(x),0,1), np.arccos, 180./np.pi, '*'),
+    
+    'jref_ltarget': ('rlevel', 'length', 'l_jeans', 'jl_ref', '/', '/', np.log2, np.ceil, '+'),
 }
 
 ch_mu5 = {

@@ -49,6 +49,11 @@ def verboseprint(verbose, *args):
 
 
 #===============================================================================
+# ==== PLOTFILE HELPER =========================================================
+#===============================================================================
+
+
+#===============================================================================
 # ==== PARAMETER FILE PARSER ===================================================
 #===============================================================================
 
@@ -261,7 +266,8 @@ def process(function, filename, verbose=False, strict=False):
     return result
 
 def batchprocess(function, filebatch, verbose=False, strict=False):
-    if hasattr(filebatch, '__iter__'):
+#    if hasattr(filebatch, '__iter__'):
+    if isinstance(filebatch, list):
         resultlist = []
         for entry in filebatch:
             resultlist.append(batchprocess(function, entry, verbose, strict=strict))
