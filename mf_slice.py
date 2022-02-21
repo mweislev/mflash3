@@ -6,9 +6,11 @@ import matplotlib.pylab as plt
 import matplotlib.colors as cl
 import matplotlib.cm as cm
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+from operator import itemgetter
 
 import libmf.micflash as mflash
 import libmf.micplot as mplot
+import libmf.tools as tools
 from var_settings_v3 import var_settings, intvar, GetVarSettings
 
 
@@ -17,41 +19,70 @@ from var_settings_v3 import var_settings, intvar, GetVarSettings
 #===============================================================================
 
 # ==== CONSTANTS ===============================================================
-version_str = 'cfslice711b'
+version_str = 'cfslice801a'
 from constants import *
 
 # ==== FILE SETTINGS ===========================================================
 var_ch = mflash.var_ch5
 basename = '*hdf5*_'
-cntrange = list(range(34,100)) + list(range(1000,1100))
+cntrange = list(range(500))
 
 # ==== FIGURE SETTINGS =========================================================
 fs = mplot.set_fig_preset('display')
-mplot.fig_outdir = 'simmov/%s-%s'%(version_str, mplot.fig_target)
+mplot.fig_outdir = 'slice/%s-%s'%(version_str, mplot.fig_target)
 
 # ==== SLICE SETTINGS ==========================================================
-point = np.array([-2.75,-14.75,11.75])*pc
-#point = np.array([5.56236,2.43744,11.9372])*pc
+point = np.array([0.,0.,0.])*au
 radius = 4e+18
 
-#stdkeys = ['temp','abund_h2','abund_co','cdto',]#'eint','lcdi','t_ff']
-stdkeys = ['dens','temp','pres','abund_co']#'eint','lcdi','t_ff']
+varsets = {
+    'mhd': ['dens::core','temp','pres::core'],
+    'vel': ['velx','vely','velz','vel'],
+    'mag': ['magx','magy','magz','mag'],
+    }
 
+stdax = [2,0,1]
 nguard = 0
 grid_interpolation = 'none'#'bilinear'
 imshow_interpolation = None#'bicubic'
 res = (None, None, None)
-x_extent = [point[0]-radius, point[0]+radius]
-y_extent = [point[1]-radius, point[1]+radius]
-z_extent = [point[2]-radius, point[2]+radius]
+x_extent = None # [point[0]-radius, point[0]+radius]
+y_extent = None # [point[1]-radius, point[1]+radius]
+z_extent = None # [point[2]-radius, point[2]+radius]
 
+
+#===============================================================================
+# ==== PLOTFILE HELPER =========================================================
+#===============================================================================
+
+def OpenPlotfile(plotfile):
+   hdfdata = mflash.plotfile(plotfile)
+   hdfdata.learn(mflash.var_mhd)
+   hdfdata.learn(mflash.var_grid)
+   hdfdata.learn(mflash.var_ch5)
+   octree = mflash.pm3dgrid(hdfdata)
+   return hdfdata octree
+
+
+#===============================================================================
+# ==== SLICE HELPER ============================================================
+#===============================================================================
+
+ax_units = {'pc':pc, 'Au':au, 'km':1e+5, 'cm':1.}
+usorter = dict(key=itemgetter(1), reverse=True)
+
+def PickAxisUnit(extent, rth=.1):
+   exmax = np.max(np.abs(extent))
+   for axulabel, axunit in sorted(ax_units.items(), **usorter):
+       if exmax > rth*axunit: break
+   return axunit, axulabel
+   
 
 #===============================================================================
 # ==== SLICE IMAGER ============================================================
 #===============================================================================
 
 ax_xy_order = {0:[1,2], 1:[0,2], 2:[0,1]}
-ax_label = [r'x [pc]', r'y [pc]', r'z [pc]']
 
 def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
             x_extent=None, y_extent=None, z_extent=None, norm=None,
@@ -71,24 +102,30 @@ def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
         x_extent=x_extent, y_extent=y_extent, z_extent=z_extent,
         xres=res[0], yres=res[1], zres=res[2]) / units
 
-    if show_title:
-        slice_title = 'Slice, '+['x','y','z'][axis]+'= %.3g pc'%(offset/pc)
-        ax.set_title(vartitle+' ('+slice_title+')')
 
     # Read simulation domain boundary coordinates
-    extent = dgrid.fgrid.extent(axis) / pc
+    extent_cgs = dgrid.fgrid.extent(axis)
     ax_x, ax_y = ax_xy_order[axis]
     if (x_extent, y_extent, z_extent)[ax_x] is not None:
-        extent[0] = np.array((x_extent, y_extent, z_extent))[ax_x] / pc
+        extent_cgs[0] = np.array((x_extent, y_extent, z_extent))[ax_x]
     if (x_extent, y_extent, z_extent)[ax_y] is not None:
-        extent[1] = np.array((x_extent, y_extent, z_extent))[ax_y] / pc
+        extent_cgs[1] = np.array((x_extent, y_extent, z_extent))[ax_y]
+    #
+    axunit, axulabel = PickAxisUnit(extent_cgs, rth=.1)
+    extent = extent_cgs / axunit
+    #
+    if show_title:
+        slice_title =  'Slice, '+['x','y','z'][axis]
+        slice_title += '= %.3g %s'%(offset/axunit, axulabel)
+        ax.set_title(vartitle+' ('+slice_title+')')
     #
     im = ax.imshow(im_data.T, origin="lower", cmap=hist_cmap, norm=norm,
     interpolation=imshow_interpolation, extent=extent.flatten())
     ax.set(xlim=extent[0], ylim=extent[1])
     #
     if show_axlabel:
-        ax.set(xlabel=ax_label[ax_x], ylabel=ax_label[ax_y])
+        axustr = ' [%s]'%axulabel
+        ax.set(xlabel=['x','y','z'][ax_x]+axustr, ylabel=['x','y','z'][ax_y]+axustr)
     #
     if show_cbar==True:
         divider = make_axes_locatable(ax)
@@ -132,7 +169,7 @@ def LoadVar(hdfdata, octree, key_in):
 # ==== MAIN ====================================================================  
 #===============================================================================
 
-def main(plotfile, y_var):
+def main(plotfile, varset_key):
 
     dirname  = os.path.dirname(plotfile)
     filename = os.path.basename(plotfile)
@@ -144,27 +181,20 @@ def main(plotfile, y_var):
         print(f'Skipping {filename}')
         return
 
-    if y_var is None:
-        varkeys = stdkeys
-    else:
-        varkeys = [y_var,]
+    varkeys = varsets.get(varset_key, 'mhd')
         
-    hdfdata = mflash.plotfile(plotfile)
-    hdfdata.learn(mflash.var_mhd)
-    hdfdata.learn(mflash.var_grid)
-    hdfdata.learn(mflash.var_ch5)
-    octree = mflash.pm3dgrid(hdfdata)
+    OpenPlotfile(plotfile)
     
     nstep = hdfdata['integer scalars/nstep']
-    simtime = hdfdata['real scalars/time'] * (1./Myr)
-    simdt = hdfdata['real scalars/dt'] * (1./Myr)
+    simtime = hdfdata['real scalars/time'] * (1e+3/Myr)
+    simdt = hdfdata['real scalars/dt'] * (1e+3/Myr)
     
     extparam = dict(x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
       
     n = len(varkeys)
     
-    strdata = (filename,nstep,simtime,simdt)
-    figtitle = '%s (step %i)\n(t= %2.6f Myr | dt= %.6f Myr)'%strdata
+    figtitle = '%s (step %i)'%(filename,nstep)
+    figtitle += ' (t= %.3f kyr | dt= %.3f kyr)'%(simtime,simdt)
 
     if n==1:
         fig, ax = plt.subplots(1, 3)
@@ -172,7 +202,7 @@ def main(plotfile, y_var):
         key = varkeys[0]
         LoadVar(hdfdata, octree, key)
         dgrid = mflash.datagrid(hdfdata[key], octree, ng=nguard, verbose=True)
-        for a in range(3):
+        for a in stdax:
             axVarSlice(ax[a], dgrid, key, axis=a, offset=point[a], **extparam)
             #rgr.axBlockSlice(ax[a], hdfdata, octree, axis=a, offset=point[a], **extparam)
     else:
@@ -181,7 +211,7 @@ def main(plotfile, y_var):
         for i,key in enumerate(varkeys):
             dgrid = mflash.datagrid(hdfdata[key], octree, ng=nguard, verbose=True)
             LoadVar(hdfdata, octree, key)
-            for a in range(3):
+            for a in stdax:
                 axVarSlice(ax[a,i], dgrid, key, axis=a, offset=point[a], **extparam)
                 #rgr.axBlockSlice(ax[a,i], hdfdata, octree, axis=a, offset=point[a], **extparam)
     
@@ -202,13 +232,13 @@ def getarg(i, default):
         
 if __name__ == '__main__':
     path = sys.argv[1]
-    y_var = getarg(2, None)
+    varset = getarg(2, None)
     if os.path.isfile(path):
-        main(path, y_var)
+        main(path, varset)
     elif os.path.isdir(path):
-        cnt, cntfiles = mplot.countbatch(path, basename, cntrange, cntdigits=4)
-        procf = lambda fn: main(fn, y_var)
-        mplot.batchprocess(procf, cntfiles, verbose=True, strict=True)
+        cnt, cntfiles = tools.countbatch(path, basename, cntrange, cntdigits=4)
+        procf = lambda fn: main(fn, varset)
+        tools.batchprocess(procf, cntfiles, verbose=True, strict=True)
     else:
         raise IOError('Path not understood.')
 
