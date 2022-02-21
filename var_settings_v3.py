@@ -19,6 +19,16 @@ mplot.build_shelixmap('mcwC', start=.88, rotations=2./3., sat=.75, gamma=1.0, Ym
 intvar = ['rlevel',]
 
 var_settings = { # units, norm, cmap, label, title, column weighting
+    'dens::corelow':[1., LogNorm(1.0e-24, 1.0e-14), get_cmap('CMRmap_r'),
+        r'$\rho$', 'g/cm$^{3}$', 'Density', 'vol'],
+    'dens::corehigh':[1., LogNorm(3.16e-19, 3.16e-12), get_cmap('CMRmap_r'),
+        r'$\rho$', 'g/cm$^{3}$', 'Density', 'vol'],
+
+    'dens::core':[1., LogNorm(1.0e-22, 1.0e-12), get_cmap('CMRmap_r'),
+        r'$\rho$', 'g/cm$^{3}$', 'Density', 'vol'],
+    'pres::core':[1., LogNorm(1.0e-10, 1.0e-6), get_cmap('CMRmap_r'),
+        r'$P_\mathrm{therm}$', 'Ba', 'Thermal Pressure', 'vol'],
+
     'ents': [1., LogNorm(40., 65.), get_cmap('CMRmap'),
         r'$s$', 'dimless', 'Entropy per Particle', 'vol'],
     'entdens': [-1.*m_a, LogNorm(1., 1e+6), get_cmap('CMRmap'),
