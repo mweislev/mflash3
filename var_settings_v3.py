@@ -294,7 +294,7 @@ var_settings = { # units, norm, cmap, label, title, column weighting
         r'$v_{y}$', 'km/s', 'Y-Velocity', 'mass'],
     'velz': [km, Normalize(-20., 20.), get_cmap('Spectral'),
         r'$v_{z}$', 'km/s', 'Z-Velocity', 'mass'],
-    'vel': [km, Normalize(0., 17.), get_cmap('Spectral'),
+    'vel': [km, Normalize(0., 17.), get_cmap('viridis_r'),
         r'$\left|v\right|$', 'km/s', 'Total Velocity', 'mass'],
     'vel::low': [km, Normalize(0., 5.), get_cmap('Spectral'),
         r'$\left|v\right|$', 'km/s', 'Total Velocity', 'mass'],
@@ -317,7 +317,7 @@ var_settings = { # units, norm, cmap, label, title, column weighting
         r'$B_{y}$', '$\mu$G', 'Y-Magnetization', 'vol'],
     'magz': [1e-6, Normalize(-15., 15.), get_cmap('Spectral'),
         r'$B_{z}$', '$\mu$G', 'Z-Magnetization', 'vol'],
-    'mag': [1e-6, LogNorm(1e-3, 1e+3), get_cmap('Spectral'),
+    'mag': [1e-6, LogNorm(1e-3, 1e+3), get_cmap('viridis_r'),
         r'$\left|B\right|$', '$\mu$G', 'Magnetization', 'vol'],
     'mag_yz': [1e-6, Normalize(0., 20.), get_cmap('Spectral'),
         r'$\left|B_{yz}\right|$', '$\mu$G', 'Magnetization', 'vol'],
@@ -438,13 +438,7 @@ var_settings = { # units, norm, cmap, label, title, column weighting
         r'$\left|\nabla B\right|$', '$\mu$G/pc', 'Magnetic Field Divergence', 'vol'],
 
     'DEFAULT': [1., LogNorm(1e-5, 1e+5), get_cmap('CMRmap_r'),
-        r'VARSIGN', 'code units', 'VARNAME', 'vol'],
-        
-    'dens::nemo': [1., LogNorm(0.2, 200.), get_cmap('skinhelix_r'),
-    r'$\rho$', 'code units', 'Density', 'vol'],
-
-    'ener::nemo': [1., LogNorm(1., 1e+4), get_cmap('CMRmap_r'),
-        r'$\varepsilon$', 'code units', 'Internal Energy', 'vol'],
+        r'VARSIGN', 'code units', 'VARNAME', 'vol'],        
 }
 
 var_keys = list(var_settings.keys())
@@ -469,10 +463,14 @@ for var in var_keys:
     if not 'dz_'+var in var_keys:
         var_settings['dz_'+var] = [unit_d, norm, cmap, label_dz, ulabel_d, title_dz, cweight]
 
-def GetVarSettings(varkey):
-    if varkey in var_settings:
+def GetVarSettings(key_in):
+    varkey = key_in.split('::')[0]
+    if key_in in var_settings:
+        vs = var_settings[key_in]
+    elif varkey in var_settings:
         vs = var_settings[varkey]
     else:
+        print(f'WARNING: No settings for variable {varkey} specified. Using defaults.')
         vs = var_settings['DEFAULT']
         vs[3] = varkey
         vs[5] = 'var %s'%varkey

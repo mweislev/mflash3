@@ -36,10 +36,11 @@ point = np.array([0.,0.,0.])*au
 radius = 4e+18
 
 varsets = {
-    'mhd': ['dens::core','temp','pres::core'],
+    'mhd': ['dens','temp','pres'],
     'vel': ['velx','vely','velz','vel'],
     'mag': ['magx','magy','magz','mag'],
     }
+varset_default = varsets['mhd']
 
 stdax = [2,0,1]
 nguard = 0
@@ -61,7 +62,7 @@ def OpenPlotfile(plotfile):
    hdfdata.learn(mflash.var_grid)
    hdfdata.learn(mflash.var_ch5)
    octree = mflash.pm3dgrid(hdfdata)
-   return hdfdata octree
+   return hdfdata, octree
 
 
 #===============================================================================
@@ -92,7 +93,7 @@ def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
         return None, None
     #
     units, varnorm, hist_cmap, varlabel, ulabel, vartitle, weighvar = GetVarSettings(var)
-    barlabel = vartitle  +' ' +varlabel +' [' +ulabel +']'
+    barlabel = f'{varlabel} [{ulabel}]'
     
     if norm is None:
         norm = varnorm
@@ -101,7 +102,6 @@ def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
         interpolation=grid_interpolation,
         x_extent=x_extent, y_extent=y_extent, z_extent=z_extent,
         xres=res[0], yres=res[1], zres=res[2]) / units
-
 
     # Read simulation domain boundary coordinates
     extent_cgs = dgrid.fgrid.extent(axis)
@@ -114,18 +114,9 @@ def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
     axunit, axulabel = PickAxisUnit(extent_cgs, rth=.1)
     extent = extent_cgs / axunit
     #
-    if show_title:
-        slice_title =  'Slice, '+['x','y','z'][axis]
-        slice_title += '= %.3g %s'%(offset/axunit, axulabel)
-        ax.set_title(vartitle+' ('+slice_title+')')
-    #
     im = ax.imshow(im_data.T, origin="lower", cmap=hist_cmap, norm=norm,
     interpolation=imshow_interpolation, extent=extent.flatten())
     ax.set(xlim=extent[0], ylim=extent[1])
-    #
-    if show_axlabel:
-        axustr = ' [%s]'%axulabel
-        ax.set(xlabel=['x','y','z'][ax_x]+axustr, ylabel=['x','y','z'][ax_y]+axustr)
     #
     if show_cbar==True:
         divider = make_axes_locatable(ax)
@@ -141,6 +132,16 @@ def axVarSlice(ax, dgrid, var, axis=2, offset=0.,
     else:
         cax = show_cbar
         cbar = plt.colorbar(im, cax=cax, label=barlabel)
+    #
+    if show_axlabel:
+        axustr = ' [%s]'%axulabel
+        ax.set(xlabel=['x','y','z'][ax_x]+axustr, ylabel=['x','y','z'][ax_y]+axustr)
+    #
+    if show_title:
+        slice_title =  ['x','y','z'][axis]
+        slice_title += '= %.3g %s'%(offset/axunit, axulabel)
+        ax.set_title(vartitle+' ('+slice_title+')')
+    #
     return im, cbar
 
 
@@ -169,56 +170,78 @@ def LoadVar(hdfdata, octree, key_in):
 # ==== MAIN ====================================================================  
 #===============================================================================
 
-def main(plotfile, varset_key):
+def main(plotfile, varset_key, varspec=None, storefig=False):
 
-    dirname  = os.path.dirname(plotfile)
-    filename = os.path.basename(plotfile)
-    simname  = os.path.basename(dirname)
-    subpath = simname
-    
-    outfilepath = mplot.get_savefig_filepath(filename, subpath)
-    if os.path.exists(outfilepath):
-        print(f'Skipping {filename}')
-        return
-
-    varkeys = varsets.get(varset_key, 'mhd')
+    varkeys = varsets.get(varset_key, varset_default)
+    if varspec is None:
+        datakeys = varkeys
+    else:
+        datakeys = ['::'.join([k,varspec]) for k in varkeys]
         
-    OpenPlotfile(plotfile)
-    
-    nstep = hdfdata['integer scalars/nstep']
-    simtime = hdfdata['real scalars/time'] * (1e+3/Myr)
-    simdt = hdfdata['real scalars/dt'] * (1e+3/Myr)
+    filename = os.path.basename(plotfile)
+        
+    if storefig: # Check if file was already made (and should be skipped)
+        dirname  = os.path.dirname(plotfile)
+        simname  = os.path.basename(dirname)
+        subpath = f'{simname}/{varset_key}'
+        outfilepath = mplot.get_savefig_filepath(filename, subpath)
+        if os.path.exists(outfilepath):
+            print(f'Skipping {filename}')
+            return None
+        
+    hdfdata, octree = OpenPlotfile(plotfile)
     
     extparam = dict(x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-      
-    n = len(varkeys)
     
-    figtitle = '%s (step %i)'%(filename,nstep)
-    figtitle += ' (t= %.3f kyr | dt= %.3f kyr)'%(simtime,simdt)
-
+    n = len(datakeys)
     if n==1:
         fig, ax = plt.subplots(1, 3)
-        fig.suptitle(figtitle)
-        key = varkeys[0]
+        key = datakeys[0]
         LoadVar(hdfdata, octree, key)
         dgrid = mflash.datagrid(hdfdata[key], octree, ng=nguard, verbose=True)
+        aspect_accu = 0.
         for a in stdax:
             axVarSlice(ax[a], dgrid, key, axis=a, offset=point[a], **extparam)
             #rgr.axBlockSlice(ax[a], hdfdata, octree, axis=a, offset=point[a], **extparam)
+            xlim = ax[a].get_xlim()
+            ylim = ax[a].get_ylim()
+            aspect = (xlim[1]-xlim[0]) / (ylim[1]-ylim[0])
+            aspect_accu += aspect
     else:
         fig, ax = plt.subplots(3, n)
-        fig.suptitle(figtitle)
-        for i,key in enumerate(varkeys):
-            dgrid = mflash.datagrid(hdfdata[key], octree, ng=nguard, verbose=True)
+        for i,key in enumerate(datakeys):
             LoadVar(hdfdata, octree, key)
+            dgrid = mflash.datagrid(hdfdata[key], octree, ng=nguard, verbose=True)
+            aspect_accu = 0.
             for a in stdax:
                 axVarSlice(ax[a,i], dgrid, key, axis=a, offset=point[a], **extparam)
                 #rgr.axBlockSlice(ax[a,i], hdfdata, octree, axis=a, offset=point[a], **extparam)
+                xlim = ax[a,i].get_xlim()
+                ylim = ax[a,i].get_ylim()
+                aspect = (xlim[1]-xlim[0]) / (ylim[1]-ylim[0])
+                aspect_accu += aspect
+
+    nstep = hdfdata['integer scalars/nstep']
+    simtime = hdfdata['real scalars/time'] * (1e+3/Myr)
+    simdt = hdfdata['real scalars/dt'] * (1e+3/Myr)
+    figtitle =  '%s (step %i)'%(filename,nstep)
+    figtitle += ' (t= %.3f kyr | dt= %.3f kyr)'%(simtime,simdt)
+    fig.suptitle(figtitle)
     
-    outfilepath = mplot.savefig(fig, filename, subpath)
+    if storefig:
+        return mplot.savefig(fig, filename, subpath)
+    else:
+        w = 5.*aspect_accu
+        h = 12. if n>1 else 6.
+        print(aspect)
+        print(w)
+        print(h)
+        fig.set_size_inches(w, h, forward=True)
+        fig.set_tight_layout(True)
+        return fig
     
     hdfdata.close()
-
+    
 
 #===============================================================================
 # ==== LOBBY ====================================================================
@@ -232,12 +255,14 @@ def getarg(i, default):
         
 if __name__ == '__main__':
     path = sys.argv[1]
-    varset = getarg(2, None)
+    varset  = getarg(2, None)
+    varspec = getarg(3, None)
     if os.path.isfile(path):
-        main(path, varset)
+        main(path, varset, varspec, storefig=False)
+        plt.show()
     elif os.path.isdir(path):
         cnt, cntfiles = tools.countbatch(path, basename, cntrange, cntdigits=4)
-        procf = lambda fn: main(fn, varset)
+        procf = lambda fn: main(fn, varset, varspec, storefig=True)
         tools.batchprocess(procf, cntfiles, verbose=True, strict=True)
     else:
         raise IOError('Path not understood.')
