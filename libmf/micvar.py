@@ -138,9 +138,10 @@ class plotfile(flashfile):
     def read(self, key):
         """ Remove inner nodes (if applicable) prior to returning flashfile data """
         data = flashfile.read(self, key)
-        if isinstance(data, np.ndarray) and hasattr(data, 'len'):
-            if len(data) == self.__nodecount and np.any(self.__nodeselect):
-                return data[self.__nodeselect]
+        if isinstance(data, np.ndarray) and np.any(self.__nodeselect):
+            if data.ndim:
+                if data.shape[0] == self.__nodecount:
+                    return data[self.__nodeselect]
         return data
     def cache(self, key, dataset, force=True):
         if self.__memorize or force:
@@ -249,7 +250,6 @@ var_grid = {
     'blockcount': ('cellcount', 'nxb', '/', 'nyb', '/', 'nzb', '/'),
     'nodeindex': ('ndid', lambda x: np.reshape(x, (-1,1,1,1)), 'intones', '*'),
     'blockindex': ('blid', lambda x: np.reshape(x, (-1,1,1,1)), 'intones', '*'),
-
     'jl_ref':   ('integer runtime parameters/ncell_ref_jeans', ),
     'jl_deref': ('integer runtime parameters/ncell_deref_jeans', ),
 }
@@ -285,6 +285,10 @@ var_mhd = {
     'velp': ('vel_sq', 'dens', '*', .5, '*'),
     'vel': ('vel_sq', np.sqrt),
     'vel_yz': ('vel_yz_sq', np.sqrt),
+    
+    'momx': ('dens', 'velx', '*'),
+    'momy': ('dens', 'vely', '*'),
+    'momz': ('dens', 'velz', '*'),
 
     'crossp': ('vely', sq, 'velz', sq, '+', 'dens', '*', .5, '*'),
     'beta_v': ('velp', 'magpres', '/'),
@@ -293,6 +297,7 @@ var_mhd = {
     'gravp': ('gpot', 'dens', '*'),
     'gravep': ('epot', 'dens', '*'),
     'p_sum': ('magpres', 'velp', '+', 'gravp', '+', 'pres', '+'),
+    'p_hdyn': ('velp', 'gravp', 'pres', '+', '+'),
     'c_s': ('pres', 'dens', '/', np.sqrt),    
     'c_a': ('mag', 4*np.pi, 'dens', '*', np.sqrt, '/'),
     'c_ma': (5./3., 'pres', '*', 'dens', '/', np.sqrt),

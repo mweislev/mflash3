@@ -40,7 +40,8 @@ def tstring(hdfdata):
 
 def flushprint(*args):
     for arg in args:
-        print(arg, end=' ')            
+        print(arg, end=' ')
+    print()    
     sys.stdout.flush()
 
 def verboseprint(verbose, *args):

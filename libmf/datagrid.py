@@ -138,7 +138,8 @@ class datagrid(object):
         This will typically be components of a grid.
         Caution: X,Y,Z need to have identical shapes;
         if using a 2d-grid, fill the remaining variable accordingly,
-        which can be done by numpy.full_like.
+        which can be done by e.g. Z=numpy.full_like(X, z_offset)
+        for an X,Y grid at a fixed z-offset.
         """
         ng = self._ng
         # Wrap coordinates to values inside grid domain:
@@ -288,10 +289,21 @@ class datagrid(object):
             result[i::chunks] = chunkresult
         return result.reshape(baseshape)
 
-# --- DATA AQUISITON HELPERS FOR COMMON TASKS ----------------------------------        
+# --- DATA AQUISITON HELPERS FOR COMMON TASKS ----------------------------------      
+    def get_slice_coords(self, axis, offset=0., **bgparam):
+        X, Y, Z = self.fgrid.basegrid_2d(axis, **bgparam)
+        if axis==0:
+            X = np.full_like(Z, offset)
+        elif axis==1:
+            Y = np.full_like(Z, offset)
+        elif axis==2:
+            Z = np.full_like(Y, offset)
+        else:
+            raise ValueError('Axis out of range(3).')
+        return X, Y, Z        
+    
     def read_slice(self, axis, offset=0.,
-        interpolation='linear', xres=None, yres=None, zres=None,
-        x_extent=None, y_extent=None, z_extent=None, wrap=True, verbose=False):
+        interpolation='linear', wrap=True, verbose=False, **bgparam):
         """
         Reads a slice perpendicular to axis from the given flashfile data
         at the given axis intercept,
@@ -302,26 +314,15 @@ class datagrid(object):
         e.g. x_extent=(x_min, x_max) for any axis.
         TODO: At this stage, the resolution refers to the entire unlimited domain.
         """
-        if axis==0:
-            Z, Y = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
-                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            X = np.full_like(Z, offset)
-        elif axis==1:
-            Z, X = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
-                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            Y = np.full_like(Z, offset)
-        elif axis==2:
-            Y, X = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
-                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            Z = np.full_like(Y, offset)
-        else:
-            raise ValueError('Axis out of range(3).' % axis)
+        #bgparam = dict(xres=xres, yres=yres, zres=zres,
+        #    x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
+        X, Y, Z = self.get_slice_coords(axis, offset=offset, **bgparam)
         return self.eval(X, Y, Z, interpolation=interpolation, axis=axis,
                          wrap=wrap, verbose=verbose)
                     
     def equalize_blockaxis(self, axis, weight_grid):
         if axis not in (0,1,2):
-            raise ValueError('Axis %i out of range(3).' % axis)
+            raise ValueError('Axis out of range(3).')
         ng = self._ng
         
         gbld_axis = -(axis+1)
@@ -344,11 +345,80 @@ class datagrid(object):
         weq_grid = datagrid(np.nan_to_num(weights_eq), self.fgrid, ng=ng, gbld_input=True)
         return deq_grid, weq_grid
         
-    def read_meanslice(self, axis, weight_data=None,
-        interpolation='linear', xres=None, yres=None, zres=None, verbose=False,
-        x_extent=None, y_extent=None, z_extent=None):
+    def extent_coverage(self, axis, x_extent, y_extent, z_extent):
+        axis_extent = (x_extent, y_extent, z_extent)[axis]
+        if axis_extent is None:
+            axis_extent = (-np.inf, np.inf)
+        extent_min, extent_max = axis_extent
+        cellcenter = self.fgrid.coords()[:,axis]
+        cellsize   = self.fgrid.cellsize()[axis][:,None,None,None]
+        cell_min = cellcenter -.5*cellsize
+        cell_extent_relmin = (extent_min-cell_min)/cellsize
+        cell_extent_relmax = (extent_max-cell_min)/cellsize
+        cell_extent_fmin = np.clip(cell_extent_relmin, 0., 1.)
+        cell_extent_fmax = np.clip(cell_extent_relmax, 0., 1.)
+        cell_coverage = cell_extent_fmax - cell_extent_fmin
+        return cell_coverage
+
+    def integrate_axis(self, axis, interpolation='linear',
+            xres=None, yres=None, zres=None,
+            x_extent=None, y_extent=None, z_extent=None):
+            
+        # XXX TODO BAUSTELLE TODO XXX
+        X, Y, Z = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
+                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
+        
+        depth_coverage = self.extent_coverage(axis, x_extent, y_extent, z_extent)  
+        weight_grid = datagrid(depth_coverage, self.fgrid, ng=self._ng)
+                                
+        # Accelerate grid scanning (1):
+        # Equalize cell data in blocks along depth axis,
+        # so that the depth scanning has to resolve the smallest block length only
+        # instead of the smallest cell length:
+        deq_g, weq_g = self.equalize_blockaxis(axis, weight_grid)
+        
+        # Accelerate grid scanning (2):
+        # Instead scanning the full depth axis using the smallest block size,
+        # scan only the midpoints of the finest resolution blocks 
+        # covering the axis. (weigh the results accordingly)
+        grating, gratedepth = self.fgrid.varblockgrating(axis)
+        
+        # Get number of cells per block along the given axis
+        nax = self.fgrid._nb[axis]
+
+        if verbose:
+            answer  = str(len(grating))
+            answer += ('*'+str(self.fgrid._nb[axis]))
+            answer += ' / ' +str(self.fgrid._domain_blocks[axis]*nax) +' (var)'
+            print(f'Depth resolution: {answer}')
+            mapres = len((X,Y,Z)[axis-1])
+            print(f'Map resolution: {mapres}')
+            sys.stdout.flush()
+            
+        coord_shape = (X,Y,Z)[axis-1].shape
+        result_accu = np.zeros(coord_shape)
+        
+        for intercept, dL in zip(grating, gratedepth):
+            if axis==0:
+                X = np.full(coord_shape, intercept)
+            elif axis==1:
+                Y = np.full(coord_shape, intercept)
+            elif axis==2:
+                Z = np.full(coord_shape, intercept)
+            blockax_avgdata_slice = deq_g.eval(X, Y, Z, interpolation=interpolation,
+                                   axis=axis, wrap=False)
+            blockax_coverage_slice = weq_g.eval(X, Y, Z, interpolation=interpolation,
+                                     axis=axis, wrap=False)
+            blockax_len_slice = nax*dL * blockax_coverage_slice
+            result_accu += blockax_avgdata_slice * blockax_len_slice
+        return result_accu
+        
+    def average_axis(self, axis, weight_data=None,
+            interpolation='linear', verbose=False,
+            xres=None, yres=None, zres=None,
+            x_extent=None, y_extent=None, z_extent=None):
         """
-        Reads a slice of weighted mean values, calculated along the given axis.
+        Reads a slice of weighted average values, calculated along the given axis.
         from the given flashfile data and weights from flashfile data.
         If no weights data is provided, equal weights are assumed.
         If no resolution is provided, the finest native grid resolution
@@ -358,32 +428,15 @@ class datagrid(object):
         The extent of the processed area can be limited by providing
         e.g. x_extent=(x_min, x_max) for any axis.
         """
-        if axis==0:
-            Z, Y = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
+        X, Y, Z = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
                 x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            X = None
-        elif axis==1:
-            Z, X = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
-                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            Y = None
-        elif axis==2:
-            Y, X = self.fgrid.basegrid_2d(axis, xres=xres, yres=yres, zres=zres,
-                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
-            Z = None
-        else:
-            raise ValueError('Axis %i out of range(3).' % axis)
         
-        axis_extent = (x_extent, y_extent, z_extent)[axis]
-        if axis_extent is None:
-            axis_extent = (-np.inf, np.inf)
-        axmin, axmax = axis_extent
-        coords = self.fgrid.coords()
-        select_extent = (coords[:,axis]>axmin)*(coords[:,axis]<axmax)
+        depth_coverage = self.extent_coverage(axis, x_extent, y_extent, z_extent)
+        
         if weight_data is None:
-            weight_data = 1.*select_extent
+            weight_data = depth_coverage
         else:
-            weight_data *= select_extent
-        
+            weight_data *= depth_coverage
         weight_grid = datagrid(weight_data, self.fgrid, ng=self._ng)
                                 
         # Accelerate grid scanning (1):
@@ -426,13 +479,15 @@ class datagrid(object):
             result_accu += dataslice*weightslice*iweight
             weight_accu += weightslice*iweight
         return result_accu/weight_accu
+    
             
     def read(self, xres=None, yres=None, zres=None,
         x_extent=None, y_extent=None, z_extent=None, interpolation=None,
         verbose=True):
         #
-        Z, Y = self.fgrid.basegrid_2d(0, xres=xres, yres=yres, zres=zres,
-            x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
+        Xfoo, Y, Z = self.fgrid.basegrid_2d(0, xres=xres, yres=yres, zres=zres,
+                x_extent=x_extent, y_extent=y_extent, z_extent=z_extent)
+        #
         x_grating = self.fgrid.grating(0, xres, x_extent)
         #
         grid_data = np.full(x_grating.shape+Z.shape, np.nan, dtype=self.gbld.dtype)
@@ -540,3 +595,55 @@ def divergence(datagrid_x, datagrid_y, datagrid_z):
     div_y = datagrid_y.derivative(axis=1)
     div_z = datagrid_z.derivative(axis=2)
     return div_x +div_y +div_z
+
+
+################################################################################
+##### CLASS: weighted flash file 3d paramesh data grid #########################
+# XXX CAUTION: THIS IS AN EXPERIMENTAL CONSTRUCTION SITE! XXX #
+################################################################################
+'''
+class wdgrid(object):
+    # gbld: guarded block data (with or without inner nodes)
+    # gblw: guarded block data weights (same format as gbld)
+    def __init__(self, blkdata, blkweights, octree, ng=2,
+            guard_input=False, verbose=False):
+        ## Save essential data
+        self._ng = ng  # Thickness of guard cell layer
+        self.octree = octree
+        ## Define some shorthands
+        rlevel = self.fgrid.blk_rlevel()
+        ntype = self.fgrid.blk_ntype()
+        # Prepare array shape for block data with guard cells:
+        blocks, nk, nj, ni = blkdata.shape
+        # Check validity of guard cell layer thickness
+        if 2*ng > min(nk,nj,ni) or ng < 0:
+            raise RuntimeError(f'Invalid thickness ({ng}) of guard cell layer.')
+        ## Fill guarded block data
+        blkdw = blkdata*blkweights
+        if ng == 0:
+            self.gblw  = np.copy(blkweights)
+            self.gbldw = blkdw
+        else:
+            ## Create placeholder fields to be filled with guarded data
+            gbld_shape = (blocks, nk+2*ng, nj+2*ng, ni+2*ng)
+            self.gblw  = np.full(gbld_shape, 0., dtype=blkdw.dtype)
+            self.gbldw = np.full(gbld_shape, 0., dtype=blkdw.dtype)
+            ## Fill non-guarded data
+            self.gblw[:,ng:-ng,ng:-ng,ng:-ng]  = blkweights
+            self.gbldw[:,ng:-ng,ng:-ng,ng:-ng] = blkdw
+            ## Fill leaf block (guard cells)
+            for r in set(rlevel):
+                rlevel_mask = rlevel==r
+                leaf_mask = ntype==1
+                blocks = np.where(rlevel_mask*leaf_mask)[0]
+                
+                chunks = 1+int(len(blocks)//1000)
+                for i in range(chunks):
+                    block_range = blocks[np.arange(i, len(blocks), chunks)]
+                    X = octree.coords(block_range, 0, ng=ng)
+                    Y = octree.coords(block_range, 1, ng=ng)
+                    Z = octree.coords(block_range, 2, ng=ng)
+                    self.gbld[block_range] = self.coeval(X, Y, Z,
+                        interpolation='gfill', wrap=True)
+'''
+

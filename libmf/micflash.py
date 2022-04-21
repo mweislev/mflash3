@@ -450,17 +450,21 @@ class pm3dgrid(object):
         if axis == 0:
             z_grating = self.grating(2, zres, z_extent)
             y_grating = self.grating(1, yres, y_extent)
-            return np.meshgrid(z_grating, y_grating)
+            Z, Y = np.meshgrid(z_grating, y_grating)
+            X = None
         elif axis == 1:
             z_grating = self.grating(2, zres, z_extent)
             x_grating = self.grating(0, xres, x_extent)
-            return np.meshgrid(z_grating, x_grating)
+            Z, X = np.meshgrid(z_grating, x_grating)
+            Y = None
         elif axis == 2:
             y_grating = self.grating(1, yres, y_extent)
             x_grating = self.grating(0, xres, x_extent)
-            return np.meshgrid(y_grating, x_grating)
+            Y, X = np.meshgrid(y_grating, x_grating)
+            Z = None
         else:
             raise ValueError('Axis out of range.')
+        return X, Y, Z
 
     def basegrid_3d(self, xres=None, yres=None, zres=None,
         x_extent=None, y_extent=None, z_extent=None):
@@ -471,15 +475,27 @@ class pm3dgrid(object):
         return np.meshgrid(y_grating, x_grating, z_grating)
 
     def varblockgrating(self, axis):
+        '''
+        Return a grating along the given axis inside the simulation domain,
+        so that the spacing is maximized while hitting the coordinate range
+        of each block and along the axis at least once.
+        The depth "range" covered by each step of the grating is given as well.
+        The combination of both informations can be used to do integration or
+        averaging along the axis by sampling block data that has already been
+        averaged along the given axis per block.
+        This is useful e.g. for rapidly calculating column densities.
+        '''
         if axis not in (0,1,2):
             raise ValueError('Axis %i out of range(3).' % axis)
         blockbounds = np.concatenate((self._bbox_min[:,axis], self._bbox_max[:,axis]))
         II = (blockbounds-self._domain_min[axis])/self._bbox_minsize[axis]
         Ipartition = np.sort(list(set(np.around(II.T))))    
         IMid = .5*(Ipartition[1:]+Ipartition[:-1])
-        IWidth = Ipartition[1:]-Ipartition[:-1]    
+        IWidth = (Ipartition[1:]-Ipartition[:-1])
+        depth = IWidth*self._bbox_minsize[axis]
         grating = self._domain_min[axis] + IMid*self._bbox_minsize[axis]
-        return grating, IWidth
+        #return grating, IWidth
+        return grating, depth
 
     def varcellgrating(self, axis, extent=None):
         if axis not in (0,1,2):
@@ -528,8 +544,8 @@ if __name__ == '__main__':
     axis = 2    
     offset = 1e-5*pc
     #Si = ddgrid.read_slice(axis, offset, interpolation='linear', verbose=True)
-    Mi = ddgrid.read_meanslice(axis, interpolation='linear', weight_data=wd,
-                               verbose=True, xres=2852, yres=713, zres=713)
+    #Mi = ddgrid.read_meanslice(axis, interpolation='linear', weight_data=wd,
+    #                           verbose=True, xres=2852, yres=713, zres=713)
     
     #import cProfile
     #import pstats
